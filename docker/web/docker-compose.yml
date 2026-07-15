@@ -1,0 +1,7 @@
+services:
+  spidersoft-web:
+    image: spidersoft-web:1.0
+    container_name: spidersoft-web
+    ports:
+      - "8080:80"
+    restart: unless-stopped
