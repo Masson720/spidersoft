@@ -7,6 +7,21 @@ services:
     restart: unless-stopped
     volumes:
       - spidersoft-web-data:/usr/share/nginx/html
+    networks:
+      - spidersoft-network
+
+  spidersoft-api:
+    image: spidersoft-api:1.0
+    container_name: spidersoft-api
+    restart: unless-stopped
+    networks:
+      - spidersoft-network
+
 
 volumes:
   spidersoft-web-data:
+
+networks:
+  spidersoft-network:
+    external: true
+
