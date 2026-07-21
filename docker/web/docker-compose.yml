@@ -5,3 +5,8 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+    volumes:
+      - spidersoft-web-data:/usr/share/nginx/html
+
+volumes:
+  spidersoft-web-data:
