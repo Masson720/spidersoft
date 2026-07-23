@@ -1,6 +1,7 @@
 services:
   spidersoft-web:
-    image: spidersoft-web:1.0
+    build: ./web
+    image: spidersoft-web:1.1
     container_name: spidersoft-web
     ports:
       - "8080:80"
@@ -11,17 +12,21 @@ services:
       APP_ENV: ${APP_ENV}
     volumes:
       - spidersoft-web-data:/usr/share/nginx/html
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - spidersoft-network
 
   spidersoft-api:
+    build: ./api
     image: spidersoft-api:1.0
     container_name: spidersoft-api
     restart: unless-stopped
+    environment:
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      APP_ENV: ${APP_ENV}
     networks:
       - spidersoft-network
-
 
 volumes:
   spidersoft-web-data:
@@ -29,4 +34,3 @@ volumes:
 networks:
   spidersoft-network:
     external: true
-
