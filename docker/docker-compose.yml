@@ -6,6 +6,9 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+    depends_on:
+      spidersoft-api:
+        condition: service_healthy
     environment:
       APP_NAME: ${APP_NAME}
       APP_VERSION: ${APP_VERSION}
@@ -28,8 +31,25 @@ services:
     networks:
       - spidersoft-network
 
+  spidersoft-db:
+    image: postgres:16
+    container_name: spidersoft-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - spidersoft-db-data:/var/lib/postgresql/data
+    networks:
+      - spidersoft-network
+
+
 volumes:
   spidersoft-web-data:
+    name: spidersoft-web-data
+  spidersoft-db-data:
+    name: spidersoft-db-data
 
 networks:
   spidersoft-network:
