@@ -28,6 +28,12 @@ services:
       APP_NAME: ${APP_NAME}
       APP_VERSION: ${APP_VERSION}
       APP_ENV: ${APP_ENV}
+
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
     networks:
       - spidersoft-network
 
@@ -41,6 +47,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - spidersoft-db-data:/var/lib/postgresql/data
+    networks:
+      - spidersoft-network
+
+  spidersoft-adminer:
+    image: adminer:latest
+    container_name: spidersoft-adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
     networks:
       - spidersoft-network
 

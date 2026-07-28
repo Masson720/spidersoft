@@ -22,15 +22,9 @@ def index():
 @app.route("/health", methods=["GET"])
 def health():
     try:
-        connection = get_connection()
-
-        cursor = connection.cursor()
-
-        cursor.execute("SELECT 1;")
-
-        cursor.close()
-
-        connection.close()
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
 
         return jsonify({
             "status": "healthy",
