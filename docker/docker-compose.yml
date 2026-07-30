@@ -74,12 +74,26 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
 
+  spidersoft-prometheus:
+    image: prom/prometheus:latest
+    container_name: spidersoft-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - spidersoft-prometheus-data:/prometheus
+    networks:
+      - spidersoft-network
+
 
 volumes:
   spidersoft-web-data:
     name: spidersoft-web-data
   spidersoft-db-data:
     name: spidersoft-db-data
+  spidersoft-prometheus-data:
+    name: spidersoft-prometheus-data
 
 networks:
   spidersoft-network:
