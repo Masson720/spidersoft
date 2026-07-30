@@ -36,6 +36,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
     networks:
       - spidersoft-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
 
   spidersoft-db:
     image: postgres:16
