@@ -18,6 +18,10 @@ services:
       - ./web/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - spidersoft-network
+    profiles:
+      - core
+      - development
+      - production
 
   spidersoft-api:
     build: ./api
@@ -43,6 +47,10 @@ services:
       retries: 3
       start_period: 5s
 
+    profiles:
+      - core
+      - development
+      - production
 
   spidersoft-db:
     image: postgres:16
@@ -56,6 +64,11 @@ services:
       - spidersoft-db-data:/var/lib/postgresql/data
     networks:
       - spidersoft-network
+    profiles:
+      - core
+      - development
+      - production
+
 
   spidersoft-adminer:
     image: adminer:latest
@@ -65,6 +78,10 @@ services:
       - "8081:8080"
     networks:
       - spidersoft-network
+    profiles:
+      - tools
+      - development
+
 
   spidersoft-cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
@@ -80,6 +97,10 @@ services:
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
+    profiles:
+      - monitoring
+      - production
+
 
   spidersoft-prometheus:
     image: prom/prometheus:latest
@@ -92,6 +113,10 @@ services:
       - spidersoft-prometheus-data:/prometheus
     networks:
       - spidersoft-network
+    profiles:
+      - monitoring
+      - production
+
 
 
 volumes:
