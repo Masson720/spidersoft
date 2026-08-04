@@ -46,6 +46,7 @@ prod: ## Запуск в production режиме (core + monitoring)
 	@echo "  Web:        http://localhost:8080"
 	@echo "  API:        http://localhost:8080/api"
 	@echo "  Prometheus: http://localhost:9090"
+	@echo "  Grafana:    http://localhost:3000 (admin/admin)"
 	@echo "  cAdvisor:   http://localhost:8082"
 
 core: ## Только ядро (web, api, db)

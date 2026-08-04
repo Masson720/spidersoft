@@ -117,6 +117,34 @@ services:
       - monitoring
       - production
 
+  spidersoft-grafana:
+    image: grafana/grafana:latest
+    container_name: spidersoft-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - spidersoft-grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    networks:
+      - spidersoft-network
+    depends_on:
+      spidersoft-prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - monitoring
+      - production
+      - development
+
 
 
 volumes:
@@ -126,6 +154,9 @@ volumes:
     name: spidersoft-db-data
   spidersoft-prometheus-data:
     name: spidersoft-prometheus-data
+  spidersoft-grafana-data:
+    name: spidersoft-grafana-data
+
 
 networks:
   spidersoft-network:
