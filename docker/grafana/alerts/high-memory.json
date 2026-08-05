@@ -1,0 +1,83 @@
+{
+  "id": 2,
+  "uid": "bfu9fy21obchse",
+  "orgID": 1,
+  "folderUID": "bfu9f9kjdanswf",
+  "ruleGroup": "default",
+  "title": "High Container Memory",
+  "condition": "C",
+  "data": [
+    {
+      "refId": "A",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "ffu5ohqakizgga",
+      "model": {
+        "editorMode": "code",
+        "exemplar": false,
+        "expr": "container_memory_usage_bytes{name=~\"spidersoft-api\"}",
+        "instant": true,
+        "intervalMs": 1000,
+        "legendFormat": "{{name}}",
+        "maxDataPoints": 43200,
+        "range": false,
+        "refId": "A"
+      }
+    },
+    {
+      "refId": "C",
+      "queryType": "expression",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "conditions": [
+          {
+            "evaluator": {
+              "params": [200000000],
+              "type": "gt"
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": ["C"]
+            },
+            "reducer": {
+              "params": [],
+              "type": "last"
+            },
+            "type": "query"
+          }
+        ],
+        "datasource": {
+          "type": "__expr__",
+          "uid": "__expr__"
+        },
+        "expression": "A",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "refId": "C",
+        "type": "threshold"
+      }
+    }
+  ],
+  "updated": "2026-08-05T12:07:35Z",
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "for": "1m",
+  "keep_firing_for": "30s",
+  "annotations": {
+    "description": "Alert when spidersoft-api container uses more than 200 MB of memory"
+  },
+  "isPaused": false,
+  "notification_settings": {
+    "receiver": "empty"
+  },
+  "record": null
+}
