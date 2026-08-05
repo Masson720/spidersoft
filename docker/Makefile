@@ -48,6 +48,7 @@ prod: ## Запуск в production режиме (core + monitoring)
 	@echo "  Prometheus: http://localhost:9090"
 	@echo "  Grafana:    http://localhost:3000 (admin/admin)"
 	@echo "  cAdvisor:   http://localhost:8082"
+	@echo "  Loki:       http://localhost:3100"
 
 core: ## Только ядро (web, api, db)
 	@echo "$(GREEN)▶ Запуск CORE сервисов...$(NC)"

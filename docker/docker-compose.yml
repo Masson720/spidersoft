@@ -135,7 +135,7 @@ services:
       spidersoft-prometheus:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3100/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -145,7 +145,41 @@ services:
       - production
       - development
 
+  spidersoft-loki:
+    image: grafana/loki:latest
+    container_name: spidersoft-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - spidersoft-loki-data:/loki
+    command: -config.file=/etc/loki/config.yml
+    networks:
+      - spidersoft-network
+    profiles:
+      - monitoring
+      - production
+      - development
 
+  spidersoft-promtail:
+    image: grafana/promtail:latest
+    container_name: spidersoft-promtail
+    restart: unless-stopped
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - spidersoft-network
+    depends_on:
+      spidersoft-loki:
+        condition: service_started
+    profiles:
+      - monitoring
+      - production
+      - development
 
 volumes:
   spidersoft-web-data:
@@ -156,7 +190,8 @@ volumes:
     name: spidersoft-prometheus-data
   spidersoft-grafana-data:
     name: spidersoft-grafana-data
-
+  spidersoft-loki-data:
+    name: spidersoft-loki-data
 
 networks:
   spidersoft-network:
