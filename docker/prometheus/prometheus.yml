@@ -21,3 +21,8 @@ scrape_configs:
     static_configs:
       - targets: ['spidersoft-postgres-exporter:9187']
     metrics_path: '/metrics'
+
+  - job_name: "node"
+    static_configs:
+      - targets:
+          - "spidersoft-node-exporter:9100"

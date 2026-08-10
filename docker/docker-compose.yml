@@ -75,6 +75,26 @@ services:
       - development
       - production
 
+  spidersoft-node-exporter:
+    image: prom/node-exporter:latest
+    container_name: spidersoft-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    networks:
+      - spidersoft-network
+    profiles:
+      - monitoring
+      - production
+      - development
 
 
 
