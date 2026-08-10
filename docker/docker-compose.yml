@@ -64,10 +64,18 @@ services:
       - spidersoft-db-data:/var/lib/postgresql/data
     networks:
       - spidersoft-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     profiles:
       - core
       - development
       - production
+
+
 
 
   spidersoft-adminer:
@@ -116,6 +124,31 @@ services:
     profiles:
       - monitoring
       - production
+
+  spidersoft-postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: spidersoft-postgres-exporter
+    restart: unless-stopped
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@spidersoft-db:5432/${POSTGRES_DB}?sslmode=disable
+    networks:
+      - spidersoft-network
+    depends_on:
+      spidersoft-db:
+        condition: service_healthy
+    command:
+      - '--collector.postmaster'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - monitoring
+      - production
+      - development
+
 
   spidersoft-grafana:
     image: grafana/grafana:latest
