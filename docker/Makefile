@@ -101,3 +101,11 @@ rebuild: force-clean ## Пересобрать и запустить
 	@echo "  Web:      http://localhost:8080"
 	@echo "  API:      http://localhost:8080/api"
 	@echo "  Adminer:  http://localhost:8081"
+
+stop: ## Остановить конкретный контейнер (укажите CONTAINER=имя, например: make stop CONTAINER=spidersoft-api)
+	@if [ -z "$(CONTAINER)" ]; then \
+		echo "$(RED)❌ Ошибка: укажите CONTAINER=имя$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)▶ Остановка контейнера $(CONTAINER)...$(NC)"
+	cd $(COMPOSE_FILE_PATH) && $(COMPOSE) stop $(CONTAINER)
