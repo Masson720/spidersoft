@@ -4,7 +4,7 @@ import socket
 import logging
 from datetime import datetime
 from flask import Flask, request, jsonify
-import psycopg
+inport psycopg
 from prometheus_client import Counter, Histogram, generate_latest, REGISTRY, CONTENT_TYPE_LATEST
 
 from pythonjsonlogger import jsonlogger
