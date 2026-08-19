@@ -32,7 +32,7 @@ docker pull "${FULL_IMAGE}"
 
 # --- 3. Обновление .env с новым тегом ---
 echo "✏️ Обновляем переменную API_IMAGE в .env"
-sed -i "s/^API_IMAGE=.*/API_IMAGE=${FULL_IMAGE}/" "${ENV_FILE}"
+sed -i "s|^API_IMAGE=.*|API_IMAGE=${FULL_IMAGE}|" "${ENV_FILE}"
 # Если переменной нет, добавляем
 grep -q "^API_IMAGE=" "${ENV_FILE}" || echo "API_IMAGE=${FULL_IMAGE}" >> "${ENV_FILE}"
 
