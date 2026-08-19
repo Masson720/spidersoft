@@ -20,7 +20,6 @@ jobs:
   test:
     name: Test Python Application
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -87,6 +86,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-        - name: Run deployment script
-          run: |
-            /opt/spidersoft/scripts/deploy-api.sh ${{ github.sha }}
+      - name: Run deployment script
+        run: |
+          /opt/spidersoft/scripts/deploy-api.sh ${{ github.sha }}
