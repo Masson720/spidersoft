@@ -78,14 +78,14 @@ jobs:
             ghcr.io/${{ env.OWNER_LC }}/spidersoft-api:${{ github.ref_name }}
             ghcr.io/${{ env.OWNER_LC }}/spidersoft-api:latest
 
-    deploy:
-      name: Deploy to SpiderSoft Server (self-hosted)
-      runs-on: self-hosted
-      needs: docker-build
-      if: github.ref == 'refs/heads/main'
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
+  deploy:
+    name: Deploy to SpiderSoft Server (self-hosted)
+    runs-on: self-hosted
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
         - name: Run deployment script
           run: |
