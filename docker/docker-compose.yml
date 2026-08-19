@@ -25,7 +25,7 @@ services:
 
   spidersoft-api:
     build: ./api
-    image: spidersoft-api:1.0
+    image: ${API_IMAGE}
     container_name: spidersoft-api
     restart: unless-stopped
     environment:
