@@ -42,29 +42,62 @@ wait_for_health() {
     local container="$1"
     local max_wait="$2"
     local interval="$3"
-    local elapsed=0
 
+    # 1. Проверяем, настроен ли healthcheck вообще
+    local has_healthcheck
+    has_healthcheck=$(docker inspect --format='{{json .Config.Healthcheck}}' "$container" 2>/dev/null)
+    
+    if [ "$has_healthcheck" = "null" ] || [ -z "$has_healthcheck" ]; then
+        echo "⚠️  Healthcheck не настроен для контейнера $container. Пропускаем ожидание."
+        log "WARNING" "Healthcheck не настроен для контейнера $container"
+        return 0
+    fi
+
+    # 2. Ждём, пока статус появится и станет healthy
+    local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
-        HEALTH_STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "none")
-        case "$HEALTH_STATUS" in
+        local health_status
+        health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "none")
+        
+        case "$health_status" in
             healthy)
+                echo "✅ Контейнер здоров"
                 return 0
                 ;;
             unhealthy)
+                echo "❌ Контейнер unhealthy"
                 return 1
                 ;;
             starting)
+                echo "⏳ Контейнер запускается (status: starting)..."
                 ;;
             none|"")
-                echo "⚠️  Healthcheck не настроен, считаем что всё ок"
-                return 0
+                echo "⏳ Статус ещё не появился..."
                 ;;
         esac
+        
         sleep $interval
         elapsed=$((elapsed + interval))
     done
 
+    echo "❌ Таймаут: контейнер не стал healthy за $max_wait секунд"
     return 1
+}
+
+# --- Функция pull образа с проверкой ---
+pull_image() {
+    local full_image="$1"
+    local desc="$2"
+    
+    echo "📦 Скачиваем образ ${full_image} (${desc})"
+    if docker pull "$full_image" > /dev/null 2>&1; then
+        echo "✅ Образ скачан успешно (${desc})"
+        return 0
+    else
+        echo "❌ Не удалось скачать образ ${full_image} (${desc})"
+        log "ERROR" "Pull failed для ${desc}: ${full_image}"
+        return 1
+    fi
 }
 
 # --- Функция деплоя конкретного SHA ---
@@ -74,11 +107,12 @@ deploy_version() {
     local desc="$2"
 
     echo "📦 Деплой ${desc}: ${sha}"
-    log "INFO" "Начало деплоя ${desc}: ${sha}"
 
-    # Скачиваем образ
-    echo "  Скачиваем образ ${full_image}"
-    docker pull "${full_image}"
+    # Явная проверка pull
+    if ! pull_image "$full_image" "$desc"; then
+        echo "❌ Невозможно продолжить: образ ${desc} не доступен"
+        return 2  # Код 2 = ошибка pull
+    fi
 
     # Обновляем .env
     sed -i "s|^API_IMAGE=.*|API_IMAGE=${full_image}|" "${ENV_FILE}"
@@ -102,6 +136,15 @@ deploy_version() {
     fi
 }
 
+# --- Функция обновления last-good-version ---
+update_last_good() {
+    local sha="$1"
+    mkdir -p "$(dirname "$LAST_GOOD_VERSION_FILE")"
+    echo "$sha" > "$LAST_GOOD_VERSION_FILE"
+    chown devops:devops "$LAST_GOOD_VERSION_FILE" 2>/dev/null || true
+    log "INFO" "Сохранена last-good-version: $sha"
+}
+
 # ============================================
 # ОСНОВНАЯ ЛОГИКА
 # ============================================
@@ -111,39 +154,53 @@ log "INFO" "Запуск деплоя версии ${TAG}"
 
 # --- 1. Сохраняем текущий SHA как last-good-version ---
 mkdir -p "$(dirname "$CURRENT_VERSION_FILE")"
-chown devops:devops "$CURRENT_VERSION_FILE"
 mkdir -p "$(dirname "$LAST_GOOD_VERSION_FILE")"
-chown devops:devops "$LAST_GOOD_VERSION_FILE"
 
 if [ -f "$CURRENT_VERSION_FILE" ]; then
     CURRENT_SHA=$(cat "$CURRENT_VERSION_FILE")
     echo "🔹 Текущая версия: $CURRENT_SHA"
-    echo "$CURRENT_SHA" > "$LAST_GOOD_VERSION_FILE"
-    echo "💾 Сохранена last-good-version: $CURRENT_SHA"
-    log "INFO" "Сохранена last-good-version: $CURRENT_SHA"
+    update_last_good "$CURRENT_SHA"
 else
-    # Если файла нет — значит, деплой впервые, берём из контейнера
+    # Если файла нет — берём из контейнера
     CURRENT_SHA=$(docker inspect "$CONTAINER_NAME" 2>/dev/null | grep -o 'ghcr.io/masson720/spidersoft-api:[a-f0-9]*' | head -1 | cut -d':' -f2 || echo "unknown")
     echo "🔹 Текущая версия (из контейнера): $CURRENT_SHA"
-    echo "$CURRENT_SHA" > "$LAST_GOOD_VERSION_FILE"
+    if [ "$CURRENT_SHA" != "unknown" ]; then
+        update_last_good "$CURRENT_SHA"
+    else
+        log "WARNING" "Не удалось определить текущую версию"
+    fi
 fi
 
 # --- 2. Пытаемся задеплоить новую версию ---
 echo ""
 echo "📌 Шаг 1: Деплой новой версии ${TAG}"
-if deploy_version "$TAG" "новая версия"; then
-    # Успешный деплой
-    echo "$TAG" > "$CURRENT_VERSION_FILE"
-    echo "✅ Деплой успешно завершён. Текущая версия: $TAG"
-    log "INFO" "Деплой успешно завершён. Новая версия: $TAG"
-    exit 0
-fi
+deploy_version "$TAG" "новая версия"
+DEPLOY_RESULT=$?
 
-# --- 3. Если новая версия не поднялась — откат ---
-echo ""
-echo "⚠️  Новая версия не поднялась. Начинаем откат..."
-log "WARNING" "Новая версия ${TAG} не поднялась. Начинаем откат"
+case $DEPLOY_RESULT in
+    0)
+        # Успешный деплой
+        echo "$TAG" > "$CURRENT_VERSION_FILE"
+        chown devops:devops "$CURRENT_VERSION_FILE" 2>/dev/null || true
+        echo "✅ Деплой успешно завершён. Текущая версия: $TAG"
+        log "INFO" "Деплой успешно завершён. Новая версия: $TAG"
+        exit 0
+        ;;
+    2)
+        # Pull failed — не пытаемся откатываться, просто выходим с ошибкой
+        echo "❌ Не удалось скачать образ новой версии. Откат не требуется."
+        log "ERROR" "Pull новой версии ${TAG} не удался. Деплой отменён."
+        exit 2
+        ;;
+    1)
+        # Деплой провалился, но образ скачан — пытаемся откат
+        echo ""
+        echo "⚠️  Новая версия не поднялась. Начинаем откат..."
+        log "WARNING" "Новая версия ${TAG} не поднялась. Начинаем откат"
+        ;;
+esac
 
+# --- 3. Откат ---
 LAST_GOOD_SHA=$(cat "$LAST_GOOD_VERSION_FILE" 2>/dev/null || echo "")
 
 if [ -z "$LAST_GOOD_SHA" ] || [ "$LAST_GOOD_SHA" = "$TAG" ]; then
@@ -155,16 +212,26 @@ fi
 echo "🔹 Откатываемся на версию: $LAST_GOOD_SHA"
 log "INFO" "Начинаем откат на версию ${LAST_GOOD_SHA}"
 
-if deploy_version "$LAST_GOOD_SHA" "старая версия (откат)"; then
-    # Откат успешен
-    echo "$LAST_GOOD_SHA" > "$CURRENT_VERSION_FILE"
-    echo "✅ Откат успешно выполнен. Текущая версия: $LAST_GOOD_SHA"
-    log "INFO" "Откат успешно выполнен на версию ${LAST_GOOD_SHA}"
-    exit 0
-else
-    # Двойной сбой: и новая, и старая версия не работают
-    echo "❌ КРИТИЧЕСКАЯ ОШИБКА: и новая, и старая версия не поднялись!"
-    log "ERROR" "Двойной сбой: новая версия ${TAG} и старая версия ${LAST_GOOD_SHA} не поднялись"
-    echo "📌 Требуется ручное вмешательство!"
-    exit 1
-fi
+deploy_version "$LAST_GOOD_SHA" "старая версия (откат)"
+ROLLBACK_RESULT=$?
+
+case $ROLLBACK_RESULT in
+    0)
+        echo "$LAST_GOOD_SHA" > "$CURRENT_VERSION_FILE"
+        chown devops:devops "$CURRENT_VERSION_FILE" 2>/dev/null || true
+        echo "✅ Откат успешно выполнен. Текущая версия: $LAST_GOOD_SHA"
+        log "INFO" "Откат успешно выполнен на версию ${LAST_GOOD_SHA}"
+        exit 0
+        ;;
+    2)
+        echo "❌ Не удалось скачать образ старой версии (откат невозможен!)"
+        log "ERROR" "Pull старой версии ${LAST_GOOD_SHA} не удался. Критическая ситуация!"
+        exit 3
+        ;;
+    *)
+        echo "❌ КРИТИЧЕСКАЯ ОШИБКА: и новая, и старая версия не поднялись!"
+        log "ERROR" "Двойной сбой: новая версия ${TAG} и старая версия ${LAST_GOOD_SHA} не поднялись"
+        echo "📌 Требуется ручное вмешательство!"
+        exit 1
+        ;;
+esac
