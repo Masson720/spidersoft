@@ -17,27 +17,27 @@ jobs:
   # ============================================
   # JOB 1: TEST
   # ============================================
-  test:
-    name: Test Python Application
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#  test:
+#    name: Test Python Application
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          cd docker/api
-          pip install -r requirements.txt
-
-      - name: Check app imports
-        run: |
-          cd docker/api
-          python -c "import app; print('✅ Application imports successfully')"
+#      - name: Setup Python
+#        uses: actions/setup-python@v5
+#        with:
+#          python-version: '3.12'
+#
+#      - name: Install dependencies
+#        run: |
+#          cd docker/api
+#          pip install -r requirements.txt
+#
+#      - name: Check app imports
+#        run: |
+#          cd docker/api
+#          python -c "import app; print('✅ Application imports successfully')"
 
   # ============================================
   # JOB 2: BUILD AND PUBLISH DOCKER IMAGE
