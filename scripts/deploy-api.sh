@@ -37,7 +37,7 @@ log() {
     fi
 }
 
-# --- Функция проверки health ---
+# --- Функция проверки health (исправленная) ---
 wait_for_health() {
     local container="$1"
     local max_wait="$2"
@@ -100,7 +100,7 @@ pull_image() {
     fi
 }
 
-# --- Функция деплоя конкретного SHA ---
+# --- Функция деплоя конкретного SHA (исправленная) ---
 deploy_version() {
     local sha="$1"
     local full_image="${REGISTRY}/${IMAGE_NAME}:${sha}"
@@ -162,7 +162,9 @@ if [ -f "$CURRENT_VERSION_FILE" ]; then
     update_last_good "$CURRENT_SHA"
 else
     # Если файла нет — берём из контейнера
-    CURRENT_SHA=$(docker inspect "$CONTAINER_NAME" 2>/dev/null | grep -o 'ghcr.io/masson720/spidersoft-api:[a-f0-9]*' | head -1 | cut -d':' -f2 || echo "unknown")
+    # Исправлено: используем переменные и явную проверку пустоты
+    CURRENT_SHA=$(docker inspect "$CONTAINER_NAME" 2>/dev/null | grep -o "${REGISTRY}/${IMAGE_NAME}:[a-f0-9]*" | head -1 | cut -d':' -f2)
+    CURRENT_SHA="${CURRENT_SHA:-unknown}"
     echo "🔹 Текущая версия (из контейнера): $CURRENT_SHA"
     if [ "$CURRENT_SHA" != "unknown" ]; then
         update_last_good "$CURRENT_SHA"
@@ -174,8 +176,13 @@ fi
 # --- 2. Пытаемся задеплоить новую версию ---
 echo ""
 echo "📌 Шаг 1: Деплой новой версии ${TAG}"
-deploy_version "$TAG" "новая версия"
-DEPLOY_RESULT=$?
+
+# Исправлено: обёрнуто в if, чтобы set -e не убивал скрипт
+if deploy_version "$TAG" "новая версия"; then
+    DEPLOY_RESULT=0
+else
+    DEPLOY_RESULT=$?
+fi
 
 case $DEPLOY_RESULT in
     0)
@@ -212,8 +219,12 @@ fi
 echo "🔹 Откатываемся на версию: $LAST_GOOD_SHA"
 log "INFO" "Начинаем откат на версию ${LAST_GOOD_SHA}"
 
-deploy_version "$LAST_GOOD_SHA" "старая версия (откат)"
-ROLLBACK_RESULT=$?
+# Исправлено: обёрнуто в if, чтобы set -e не убивал скрипт
+if deploy_version "$LAST_GOOD_SHA" "старая версия (откат)"; then
+    ROLLBACK_RESULT=0
+else
+    ROLLBACK_RESULT=$?
+fi
 
 case $ROLLBACK_RESULT in
     0)
