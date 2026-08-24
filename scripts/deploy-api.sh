@@ -111,7 +111,9 @@ log "INFO" "Запуск деплоя версии ${TAG}"
 
 # --- 1. Сохраняем текущий SHA как last-good-version ---
 mkdir -p "$(dirname "$CURRENT_VERSION_FILE")"
+chown devops:devops "$CURRENT_VERSION_FILE"
 mkdir -p "$(dirname "$LAST_GOOD_VERSION_FILE")"
+chown devops:devops "$LAST_GOOD_VERSION_FILE"
 
 if [ -f "$CURRENT_VERSION_FILE" ]; then
     CURRENT_SHA=$(cat "$CURRENT_VERSION_FILE")
