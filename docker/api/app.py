@@ -8,7 +8,7 @@ import psycopg
 from prometheus_client import Counter, Histogram, generate_latest, REGISTRY, CONTENT_TYPE_LATEST
 
 from pythonjsonlogger import jsonlogger
-
+time.sleep(30)
 # ============================================
 # НАСТРОЙКА ЛОГГЕРА
 # ============================================
