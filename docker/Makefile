@@ -1,3 +1,4 @@
+
 .PHONY: help dev prod core monitoring tools all down clean status logs rebuild force-clean
 
 # ============================================
@@ -26,10 +27,17 @@ help: ## Показать справку
 	@echo "$(YELLOW)Примеры:$(NC)"
 	@echo "  make dev      - Запуск разработки"
 	@echo "  make prod     - Запуск production"
+	@echo "  make deploy   - Запуск Deploy"
 	@echo "  make status   - Проверка статуса"
 	@echo "  make down     - Остановка"
 	@echo "  make clean    - Полная очистка"
 	@echo "  make force-clean - Принудительная очистка (если что-то сломалось)"
+
+deploy: ## Развернуть production из образов GHCR
+	@echo "$(GREEN)▶ Деплой из GHCR...$(NC)"
+	cd $(COMPOSE_FILE_PATH) && \
+	API_IMAGE=ghcr.io/masson720/spidersoft-api:latest \
+	$(COMPOSE) --profile core --profile monitoring up -d --no-build
 
 dev: ## Запуск в режиме разработки (core + tools)
 	@echo "$(GREEN)▶ Запуск DEVELOPMENT окружения...$(NC)"
@@ -70,8 +78,21 @@ down: ## Остановить все сервисы
 	@echo "$(YELLOW)▶ Остановка всех сервисов...$(NC)"
 	cd $(COMPOSE_FILE_PATH) && $(COMPOSE) down
 
-clean: down ## Полная очистка (остановка + удаление volumes)
-	@echo "$(RED)▶ Очистка данных...$(NC)"
+clean: ## Полная очистка (остановка + удаление volumes)
+	@echo "$(RED)⚠️  ВНИМАНИЕ! Это действие удалит ВСЕ данные:$(NC)"
+	@echo "  - База данных PostgreSQL"
+	@echo "  - Метрики Prometheus"
+	@echo "  - Настройки Grafana (дашборды, алерты)"
+	@echo "  - Логи Loki"
+	@echo "  - Данные веб-сервера"
+	@echo ""
+	@echo "$(RED)Восстановление будет невозможно без резервной копии!$(NC)"
+	@read -p "$(YELLOW)Введите 'yes' для подтверждения: $(NC)" confirm; \
+	if [ "$$confirm" != "yes" ]; then \
+		echo "$(GREEN)Операция отменена.$(NC)"; \
+		exit 0; \
+	fi
+	@echo "$(RED)▶ Удаление контейнеров и данных...$(NC)"
 	cd $(COMPOSE_FILE_PATH) && $(COMPOSE) down -v
 	@echo "$(RED)⚠️  Все данные удалены!$(NC)"
 

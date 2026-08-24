@@ -7,7 +7,7 @@ server:
   grpc_listen_port: 9095
 
 common:
-  instance_addr: 127.0.0.1
+  instance_addr: spidersoft-loki
   path_prefix: /loki
   storage:
     filesystem:
@@ -36,3 +36,13 @@ limits_config:
 compactor:
   working_directory: /loki/compactor
   compaction_interval: 10m
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 5m
+  chunk_retain_period: 30s
