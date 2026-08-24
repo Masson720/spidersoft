@@ -76,4 +76,12 @@ else
 fi
 echo
 
+echo ""
+echo "=== Текущая версия API ==="
+if [ -f /opt/spidersoft/app/current-version ]; then
+    echo "  $(cat /opt/spidersoft/app/current-version)"
+else
+    echo "  ⚠️ Неизвестно (файл current-version не найден)"
+fi
+
 echo "========================================="
