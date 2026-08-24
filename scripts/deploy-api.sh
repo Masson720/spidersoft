@@ -19,7 +19,7 @@ COMPOSE_DIR="/opt/spidersoft/docker"
 ENV_FILE="${COMPOSE_DIR}/.env"
 CURRENT_VERSION_FILE="/opt/spidersoft/app/current-version"
 LAST_GOOD_VERSION_FILE="/opt/spidersoft/app/last-good-version"
-CONTAINER_NAME="spidersoft-api"
+CONTAINER_NAME="spidersoft-web"
 LOG_SCRIPT="/opt/spidersoft/scripts/log_message.sh"
 
 # Таймаут ожидания health (в секундах)
