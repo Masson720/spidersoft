@@ -1,248 +1,569 @@
 #!/bin/bash
+
 # Скрипт деплоя API с автоматическим откатом
 
-set -e  # Остановка при критической ошибке
+set -Eeuo pipefail
 
 # --- Параметры ---
+
+if [[ $# -ne 1 ]]; then
+    printf 'Ошибка: не указан тег образа.\n' >&2
+    printf 'Использование: %s <sha>\n' "$0" >&2
+    exit 1
+fi
+
 TAG="$1"
-if [ -z "$TAG" ]; then
-    echo "❌ Ошибка: не указан тег образа"
-    echo "Использование: $0 <sha>"
+
+# Проверяем, что тег похож на SHA
+if [[ ! "$TAG" =~ ^[a-fA-F0-9]{7,64}$ ]]; then
+    printf 'Ошибка: некорректный SHA-тег: %s\n' "$TAG" >&2
     exit 1
 fi
 
 # --- Конфигурация ---
-REGISTRY="ghcr.io/masson720"
-IMAGE_NAME="spidersoft-api"
-FULL_IMAGE="${REGISTRY}/${IMAGE_NAME}:${TAG}"
-COMPOSE_DIR="/opt/spidersoft/docker"
-ENV_FILE="${COMPOSE_DIR}/.env"
-CURRENT_VERSION_FILE="/opt/spidersoft/app/current-version"
-LAST_GOOD_VERSION_FILE="/opt/spidersoft/app/last-good-version"
-CONTAINER_NAME="spidersoft-api"
-LOG_SCRIPT="/opt/spidersoft/scripts/log_message.sh"
 
-# Таймаут ожидания health (в секундах)
-MAX_WAIT=30
-INTERVAL=2
+readonly REGISTRY="ghcr.io/masson720"
+readonly IMAGE_NAME="spidersoft-api"
+readonly FULL_IMAGE="${REGISTRY}/${IMAGE_NAME}:${TAG}"
 
-# --- Функция логирования ---
+readonly COMPOSE_DIR="/opt/spidersoft/docker"
+readonly ENV_FILE="${COMPOSE_DIR}/.env"
+
+readonly CURRENT_VERSION_FILE="/opt/spidersoft/app/current-version"
+readonly LAST_GOOD_VERSION_FILE="/opt/spidersoft/app/last-good-version"
+
+readonly CONTAINER_NAME="spidersoft-api"
+readonly LOG_SCRIPT="/opt/spidersoft/scripts/log_message.sh"
+readonly FALLBACK_LOG_FILE="/var/log/spidersoft/admin.log"
+
+# Таймаут ожидания health в секундах
+readonly MAX_WAIT=30
+readonly INTERVAL=2
+
+
+# ============================================================
+# ЛОГИРОВАНИЕ
+# ============================================================
+
 log() {
     local level="$1"
     local message="$2"
-    if [ -f "$LOG_SCRIPT" ]; then
-        "$LOG_SCRIPT" "$level" "deploy-api.sh: $message"
+
+    # Ошибка логирования НИКОГДА не должна ломать деплой.
+    if [[ -x "$LOG_SCRIPT" ]]; then
+        if ! "$LOG_SCRIPT" "$level" "deploy-api.sh: $message" 2>/dev/null; then
+            # Пытаемся записать напрямую в лог.
+            # Если и это невозможно из-за permission denied —
+            # просто игнорируем ошибку.
+            printf '%s [%s] deploy-api.sh: %s\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S')" \
+                "$level" \
+                "$message" >> "$FALLBACK_LOG_FILE" 2>/dev/null || true
+        fi
     else
-        echo "[$level] $message" >> /var/log/spidersoft/admin.log
+        printf '%s [%s] deploy-api.sh: %s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" \
+            "$level" \
+            "$message" >> "$FALLBACK_LOG_FILE" 2>/dev/null || true
     fi
+
+    # log всегда возвращает 0.
+    return 0
 }
 
-# --- Функция проверки health (исправленная) ---
+
+# ============================================================
+# ПРОВЕРКА HEALTH
+# ============================================================
+
 wait_for_health() {
     local container="$1"
     local max_wait="$2"
     local interval="$3"
 
-    # 1. Проверяем, настроен ли healthcheck вообще
-    local has_healthcheck
-    has_healthcheck=$(docker inspect --format='{{json .Config.Healthcheck}}' "$container" 2>/dev/null)
-    
-    if [ "$has_healthcheck" = "null" ] || [ -z "$has_healthcheck" ]; then
-        echo "⚠️  Healthcheck не настроен для контейнера $container. Пропускаем ожидание."
+    local health_config
+    local elapsed=0
+    local health_status
+
+    # Сначала убеждаемся, что контейнер существует.
+    if ! docker inspect "$container" >/dev/null 2>&1; then
+        printf 'Ошибка: контейнер %s не найден.\n' "$container" >&2
+        log "ERROR" "Контейнер не найден: $container"
+        return 1
+    fi
+
+    # Проверяем, настроен ли healthcheck.
+    if ! health_config="$(
+        docker inspect \
+            --format='{{json .Config.Healthcheck}}' \
+            "$container" 2>/dev/null
+    )"; then
+        printf 'Ошибка: не удалось получить конфигурацию healthcheck.\n' >&2
+        log "ERROR" "Не удалось проверить healthcheck контейнера $container"
+        return 1
+    fi
+
+    if [[ "$health_config" == "null" || -z "$health_config" ]]; then
+        printf 'Предупреждение: healthcheck не настроен для контейнера %s.\n' \
+            "$container"
+
         log "WARNING" "Healthcheck не настроен для контейнера $container"
+
         return 0
     fi
 
-    # 2. Ждём, пока статус появится и станет healthy
-    local elapsed=0
-    while [ $elapsed -lt $max_wait ]; do
-        local health_status
-        health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "none")
-        
+    # Ждём, пока контейнер станет healthy.
+    while (( elapsed < max_wait )); do
+
+        health_status="$(
+            docker inspect \
+                --format='{{.State.Health.Status}}' \
+                "$container" 2>/dev/null || true
+        )"
+
         case "$health_status" in
             healthy)
-                echo "✅ Контейнер здоров"
+                printf 'Контейнер здоров.\n'
                 return 0
                 ;;
+
             unhealthy)
-                echo "❌ Контейнер unhealthy"
+                printf 'Контейнер unhealthy.\n'
                 return 1
                 ;;
+
             starting)
-                echo "⏳ Контейнер запускается (status: starting)..."
+                printf 'Контейнер запускается (status: starting)...\n'
                 ;;
+
             none|"")
-                echo "⏳ Статус ещё не появился..."
+                printf 'Статус health ещё не появился...\n'
+                ;;
+
+            *)
+                printf 'Неизвестный health status: %s\n' "$health_status"
                 ;;
         esac
-        
-        sleep $interval
+
+        sleep "$interval"
         elapsed=$((elapsed + interval))
     done
 
-    echo "❌ Таймаут: контейнер не стал healthy за $max_wait секунд"
+    printf 'Таймаут: контейнер не стал healthy за %s секунд.\n' \
+        "$max_wait"
+
     return 1
 }
 
-# --- Функция pull образа с проверкой ---
+
+# ============================================================
+# PULL ОБРАЗА
+# ============================================================
+
 pull_image() {
     local full_image="$1"
     local desc="$2"
-    
-    echo "📦 Скачиваем образ ${full_image} (${desc})"
+
+    printf 'Скачиваем образ %s (%s)\n' "$full_image" "$desc"
+
     if docker pull "$full_image" > /dev/null 2>&1; then
-        echo "✅ Образ скачан успешно (${desc})"
+        printf 'Образ скачан успешно (%s)\n' "$desc"
         return 0
-    else
-        echo "❌ Не удалось скачать образ ${full_image} (${desc})"
-        log "ERROR" "Pull failed для ${desc}: ${full_image}"
-        return 1
     fi
+
+    printf 'Не удалось скачать образ %s (%s)\n' \
+        "$full_image" \
+        "$desc" >&2
+
+    log "ERROR" "Pull failed для ${desc}: ${full_image}"
+
+    return 1
 }
 
-# --- Функция деплоя конкретного SHA (исправленная) ---
+
+# ============================================================
+# ДЕПЛОЙ КОНКРЕТНОЙ ВЕРСИИ
+# ============================================================
+
 deploy_version() {
     local sha="$1"
-    local full_image="${REGISTRY}/${IMAGE_NAME}:${sha}"
     local desc="$2"
 
-    echo "📦 Деплой ${desc}: ${sha}"
+    local full_image="${REGISTRY}/${IMAGE_NAME}:${sha}"
 
-    # Явная проверка pull
+    printf 'Деплой %s: %s\n' "$desc" "$sha"
+
+    # --------------------------------------------------------
+    # 1. Скачиваем образ
+    # --------------------------------------------------------
+
     if ! pull_image "$full_image" "$desc"; then
-        echo "❌ Невозможно продолжить: образ ${desc} не доступен"
-        return 2  # Код 2 = ошибка pull
+        printf 'Невозможно продолжить: образ %s недоступен.\n' "$desc" >&2
+
+        return 2
     fi
 
-    # Обновляем .env
-    sed -i "s|^API_IMAGE=.*|API_IMAGE=${full_image}|" "${ENV_FILE}"
-    if ! grep -q "^API_IMAGE=" "${ENV_FILE}"; then
-        echo "API_IMAGE=${full_image}" >> "${ENV_FILE}"
-    fi
+    # --------------------------------------------------------
+    # 2. Проверяем compose directory и .env
+    # --------------------------------------------------------
 
-    # Перезапускаем контейнер
-    cd "$COMPOSE_DIR"
-    docker compose -p spidersoft up -d --force-recreate --no-deps --no-build "$CONTAINER_NAME"
+    if [[ ! -d "$COMPOSE_DIR" ]]; then
+        printf 'Ошибка: каталог Compose не существует: %s\n' \
+            "$COMPOSE_DIR" >&2
 
-    # Ждём health
-    if wait_for_health "$CONTAINER_NAME" "$MAX_WAIT" "$INTERVAL"; then
-        echo "✅ Контейнер здоров (${desc})"
-        log "INFO" "Контейнер успешно поднялся (${desc})"
-        return 0
-    else
-        echo "❌ Контейнер не стал healthy (${desc})"
-        log "ERROR" "Контейнер не стал healthy (${desc})"
+        log "ERROR" "Compose directory не найден: $COMPOSE_DIR"
+
         return 1
     fi
+
+    if [[ ! -f "$ENV_FILE" ]]; then
+        printf 'Ошибка: .env файл не найден: %s\n' "$ENV_FILE" >&2
+
+        log "ERROR" "ENV_FILE не найден: $ENV_FILE"
+
+        return 1
+    fi
+
+    # --------------------------------------------------------
+    # 3. Обновляем API_IMAGE
+    # --------------------------------------------------------
+
+    if grep -q '^API_IMAGE=' "$ENV_FILE"; then
+        if ! sed -i "s|^API_IMAGE=.*|API_IMAGE=${full_image}|" "$ENV_FILE"; then
+            printf 'Ошибка: не удалось обновить API_IMAGE.\n' >&2
+
+            log "ERROR" "Не удалось обновить API_IMAGE в $ENV_FILE"
+
+            return 1
+        fi
+    else
+        if ! printf 'API_IMAGE=%s\n' "$full_image" >> "$ENV_FILE"; then
+            printf 'Ошибка: не удалось добавить API_IMAGE в .env.\n' >&2
+
+            log "ERROR" "Не удалось добавить API_IMAGE в $ENV_FILE"
+
+            return 1
+        fi
+    fi
+
+    # --------------------------------------------------------
+    # 4. Перезапускаем контейнер
+    # --------------------------------------------------------
+
+    cd "$COMPOSE_DIR"
+
+    if ! docker compose \
+        -p spidersoft \
+        up -d \
+        --force-recreate \
+        --no-deps \
+        --no-build \
+        "$CONTAINER_NAME"; then
+
+        printf 'Ошибка: не удалось запустить контейнер %s.\n' \
+            "$CONTAINER_NAME" >&2
+
+        log "ERROR" "docker compose up завершился ошибкой для $desc"
+
+        return 1
+    fi
+
+    # --------------------------------------------------------
+    # 5. Проверяем health
+    # --------------------------------------------------------
+
+    if wait_for_health "$CONTAINER_NAME" "$MAX_WAIT" "$INTERVAL"; then
+        printf 'Контейнер здоров (%s).\n' "$desc"
+
+        log "INFO" "Контейнер успешно поднялся (${desc})"
+
+        return 0
+    fi
+
+    printf 'Контейнер не стал healthy (%s).\n' "$desc" >&2
+
+    log "ERROR" "Контейнер не стал healthy (${desc})"
+
+    return 1
 }
 
-# --- Функция обновления last-good-version ---
+
+# ============================================================
+# ОБНОВЛЕНИЕ LAST-GOOD-VERSION
+# ============================================================
+
 update_last_good() {
     local sha="$1"
-    mkdir -p "$(dirname "$LAST_GOOD_VERSION_FILE")"
-    echo "$sha" > "$LAST_GOOD_VERSION_FILE"
+
+    local directory
+    directory="$(dirname "$LAST_GOOD_VERSION_FILE")"
+
+    if ! mkdir -p "$directory"; then
+        printf 'Ошибка: не удалось создать каталог %s.\n' \
+            "$directory" >&2
+
+        log "ERROR" "Не удалось создать каталог $directory"
+
+        return 1
+    fi
+
+    if ! printf '%s\n' "$sha" > "$LAST_GOOD_VERSION_FILE"; then
+        printf 'Ошибка: не удалось сохранить last-good-version.\n' >&2
+
+        log "ERROR" "Не удалось записать $LAST_GOOD_VERSION_FILE"
+
+        return 1
+    fi
+
+    # Если chown недоступен — это не ломает основной процесс.
     chown devops:devops "$LAST_GOOD_VERSION_FILE" 2>/dev/null || true
+
     log "INFO" "Сохранена last-good-version: $sha"
+
+    return 0
 }
 
-# ============================================
-# ОСНОВНАЯ ЛОГИКА
-# ============================================
 
-echo "🚀 Запуск деплоя с автоматическим откатом"
+# ============================================================
+# ОСНОВНАЯ ЛОГИКА
+# ============================================================
+
+printf 'Запуск деплоя с автоматическим откатом.\n'
+
 log "INFO" "Запуск деплоя версии ${TAG}"
 
-# --- 1. Сохраняем текущий SHA как last-good-version ---
-mkdir -p "$(dirname "$CURRENT_VERSION_FILE")"
-mkdir -p "$(dirname "$LAST_GOOD_VERSION_FILE")"
 
-if [ -f "$CURRENT_VERSION_FILE" ]; then
-    CURRENT_SHA=$(cat "$CURRENT_VERSION_FILE")
-    echo "🔹 Текущая версия: $CURRENT_SHA"
-    update_last_good "$CURRENT_SHA"
-else
-    # Если файла нет — берём из контейнера
-    # Исправлено: используем переменные и явную проверку пустоты
-    CURRENT_SHA=$(docker inspect "$CONTAINER_NAME" 2>/dev/null | grep -o "${REGISTRY}/${IMAGE_NAME}:[a-f0-9]*" | head -1 | cut -d':' -f2)
-    CURRENT_SHA="${CURRENT_SHA:-unknown}"
-    echo "🔹 Текущая версия (из контейнера): $CURRENT_SHA"
-    if [ "$CURRENT_SHA" != "unknown" ]; then
-        update_last_good "$CURRENT_SHA"
+# ------------------------------------------------------------
+# 1. Определяем текущую версию
+# ------------------------------------------------------------
+
+if ! mkdir -p "$(dirname "$CURRENT_VERSION_FILE")"; then
+    printf 'Ошибка: не удалось создать каталог для current-version.\n' >&2
+    log "ERROR" "Не удалось создать каталог для current-version"
+    exit 1
+fi
+
+if ! mkdir -p "$(dirname "$LAST_GOOD_VERSION_FILE")"; then
+    printf 'Ошибка: не удалось создать каталог для last-good-version.\n' >&2
+    log "ERROR" "Не удалось создать каталог для last-good-version"
+    exit 1
+fi
+
+
+if [[ -f "$CURRENT_VERSION_FILE" ]]; then
+
+    CURRENT_SHA="$(<"$CURRENT_VERSION_FILE")"
+
+    if [[ -n "$CURRENT_SHA" ]]; then
+        printf 'Текущая версия: %s\n' "$CURRENT_SHA"
+
+        if ! update_last_good "$CURRENT_SHA"; then
+            printf 'Ошибка: не удалось сохранить предыдущую рабочую версию.\n' >&2
+            exit 1
+        fi
     else
+        printf 'Предупреждение: current-version пуст.\n'
+        log "WARNING" "Файл current-version пуст"
+
+        CURRENT_SHA="unknown"
+    fi
+
+else
+
+    # Если current-version отсутствует,
+    # пытаемся определить образ непосредственно из контейнера.
+    CURRENT_IMAGE="$(
+        docker inspect \
+            --format='{{.Config.Image}}' \
+            "$CONTAINER_NAME" 2>/dev/null || true
+    )"
+
+    if [[ "$CURRENT_IMAGE" =~ ^${REGISTRY}/${IMAGE_NAME}:([a-fA-F0-9]{7,64})$ ]]; then
+        CURRENT_SHA="${BASH_REMATCH[1]}"
+
+        printf 'Текущая версия (из контейнера): %s\n' "$CURRENT_SHA"
+
+        if ! update_last_good "$CURRENT_SHA"; then
+            printf 'Ошибка: не удалось сохранить предыдущую рабочую версию.\n' >&2
+            exit 1
+        fi
+    else
+        CURRENT_SHA="unknown"
+
+        printf 'Текущая версия: неизвестна.\n'
+
         log "WARNING" "Не удалось определить текущую версию"
     fi
 fi
 
-# --- 2. Пытаемся задеплоить новую версию ---
-echo ""
-echo "📌 Шаг 1: Деплой новой версии ${TAG}"
 
-# Исправлено: обёрнуто в if, чтобы set -e не убивал скрипт
+# ------------------------------------------------------------
+# 2. Пытаемся задеплоить новую версию
+# ------------------------------------------------------------
+
+printf '\n'
+printf 'Шаг 1: Деплой новой версии %s\n' "$TAG"
+
+
+# Важно:
+# deploy_version может вернуть 1 или 2.
+# Поэтому вызываем её внутри if — set -e здесь не должен
+# преждевременно завершить весь скрипт.
+
 if deploy_version "$TAG" "новая версия"; then
     DEPLOY_RESULT=0
 else
     DEPLOY_RESULT=$?
 fi
 
-case $DEPLOY_RESULT in
+
+case "$DEPLOY_RESULT" in
+
     0)
+        # ----------------------------------------------------
         # Успешный деплой
-        echo "$TAG" > "$CURRENT_VERSION_FILE"
+        # ----------------------------------------------------
+
+        if ! printf '%s\n' "$TAG" > "$CURRENT_VERSION_FILE"; then
+            printf 'Ошибка: не удалось сохранить current-version.\n' >&2
+            log "ERROR" "Не удалось записать current-version"
+            exit 1
+        fi
+
         chown devops:devops "$CURRENT_VERSION_FILE" 2>/dev/null || true
-        echo "✅ Деплой успешно завершён. Текущая версия: $TAG"
+
+        printf 'Деплой успешно завершён.\n'
+        printf 'Текущая версия: %s\n' "$TAG"
+
         log "INFO" "Деплой успешно завершён. Новая версия: $TAG"
+
         exit 0
         ;;
+
+
     2)
-        # Pull failed — не пытаемся откатываться, просто выходим с ошибкой
-        echo "❌ Не удалось скачать образ новой версии. Откат не требуется."
+        # ----------------------------------------------------
+        # Pull новой версии не удался
+        # ----------------------------------------------------
+
+        printf 'Не удалось скачать образ новой версии.\n'
+        printf 'Откат не требуется.\n'
+
         log "ERROR" "Pull новой версии ${TAG} не удался. Деплой отменён."
+
         exit 2
         ;;
+
+
     1)
-        # Деплой провалился, но образ скачан — пытаемся откат
-        echo ""
-        echo "⚠️  Новая версия не поднялась. Начинаем откат..."
+        # ----------------------------------------------------
+        # Образ скачан, но контейнер не поднялся
+        # ----------------------------------------------------
+
+        printf '\n'
+        printf 'Новая версия не поднялась. Начинаем откат...\n'
+
         log "WARNING" "Новая версия ${TAG} не поднялась. Начинаем откат"
         ;;
+
+
+    *)
+        printf 'Неизвестный код результата деплоя: %s\n' \
+            "$DEPLOY_RESULT" >&2
+
+        log "ERROR" "Неизвестный код результата deploy_version: $DEPLOY_RESULT"
+
+        exit 1
+        ;;
+
 esac
 
-# --- 3. Откат ---
-LAST_GOOD_SHA=$(cat "$LAST_GOOD_VERSION_FILE" 2>/dev/null || echo "")
 
-if [ -z "$LAST_GOOD_SHA" ] || [ "$LAST_GOOD_SHA" = "$TAG" ]; then
-    echo "❌ Нет предыдущей рабочей версии для отката!"
+# ------------------------------------------------------------
+# 3. Получаем последнюю рабочую версию
+# ------------------------------------------------------------
+
+LAST_GOOD_SHA="$(
+    cat "$LAST_GOOD_VERSION_FILE" 2>/dev/null || true
+)"
+
+if [[ -z "$LAST_GOOD_SHA" || "$LAST_GOOD_SHA" == "$TAG" ]]; then
+
+    printf 'Нет предыдущей рабочей версии для отката.\n' >&2
+
     log "ERROR" "Откат невозможен: нет предыдущей рабочей версии"
+
     exit 1
 fi
 
-echo "🔹 Откатываемся на версию: $LAST_GOOD_SHA"
+
+printf 'Откатываемся на версию: %s\n' "$LAST_GOOD_SHA"
+
 log "INFO" "Начинаем откат на версию ${LAST_GOOD_SHA}"
 
-# Исправлено: обёрнуто в if, чтобы set -e не убивал скрипт
+
+# ------------------------------------------------------------
+# 4. Выполняем откат
+# ------------------------------------------------------------
+
 if deploy_version "$LAST_GOOD_SHA" "старая версия (откат)"; then
     ROLLBACK_RESULT=0
 else
     ROLLBACK_RESULT=$?
 fi
 
-case $ROLLBACK_RESULT in
+
+case "$ROLLBACK_RESULT" in
+
     0)
-        echo "$LAST_GOOD_SHA" > "$CURRENT_VERSION_FILE"
+        # ----------------------------------------------------
+        # Откат успешен
+        # ----------------------------------------------------
+
+        if ! printf '%s\n' "$LAST_GOOD_SHA" > "$CURRENT_VERSION_FILE"; then
+            printf 'Ошибка: не удалось сохранить current-version после отката.\n' >&2
+            log "ERROR" "Не удалось обновить current-version после отката"
+            exit 1
+        fi
+
         chown devops:devops "$CURRENT_VERSION_FILE" 2>/dev/null || true
-        echo "✅ Откат успешно выполнен. Текущая версия: $LAST_GOOD_SHA"
+
+        printf 'Откат успешно выполнен.\n'
+        printf 'Текущая версия: %s\n' "$LAST_GOOD_SHA"
+
         log "INFO" "Откат успешно выполнен на версию ${LAST_GOOD_SHA}"
+
         exit 0
         ;;
+
+
     2)
-        echo "❌ Не удалось скачать образ старой версии (откат невозможен!)"
-        log "ERROR" "Pull старой версии ${LAST_GOOD_SHA} не удался. Критическая ситуация!"
+        # ----------------------------------------------------
+        # Не удалось скачать старую версию
+        # ----------------------------------------------------
+
+        printf 'Не удалось скачать образ старой версии.\n' >&2
+        printf 'Откат невозможен. Требуется ручное вмешательство.\n' >&2
+
+        log "ERROR" \
+            "Pull старой версии ${LAST_GOOD_SHA} не удался. Критическая ситуация!"
+
         exit 3
         ;;
+
+
     *)
-        echo "❌ КРИТИЧЕСКАЯ ОШИБКА: и новая, и старая версия не поднялись!"
-        log "ERROR" "Двойной сбой: новая версия ${TAG} и старая версия ${LAST_GOOD_SHA} не поднялись"
-        echo "📌 Требуется ручное вмешательство!"
+        # ----------------------------------------------------
+        # Новая и старая версии не поднялись
+        # ----------------------------------------------------
+
+        printf 'КРИТИЧЕСКАЯ ОШИБКА: и новая, и старая версия не поднялись.\n' >&2
+        printf 'Требуется ручное вмешательство.\n' >&2
+
+        log "ERROR" \
+            "Двойной сбой: новая версия ${TAG} и старая версия ${LAST_GOOD_SHA} не поднялись"
+
         exit 1
         ;;
+
 esac
