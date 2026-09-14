@@ -356,10 +356,21 @@ if [[ -f "$CURRENT_VERSION_FILE" ]]; then
 
     if [[ -n "$CURRENT_SHA" ]]; then
         printf 'Текущая версия: %s\n' "$CURRENT_SHA"
+        printf 'Проверяем состояние текущего контейнера...\n'
 
-        if ! update_last_good "$CURRENT_SHA"; then
-            printf 'Ошибка: не удалось сохранить предыдущую рабочую версию.\n' >&2
-            exit 1
+        if wait_for_health "$CONTAINER_NAME" 10 "$INTERVAL"; then
+            printf 'Текущая версия %s подтверждена как healthy.\n' "$CURRENT_SHA"
+
+            if ! update_last_good "$CURRENT_SHA"; then
+                printf 'Ошибка: не удалось сохранить предыдущую рабочую версию.\n' >&2
+                log "ERROR" "Не удалось сохранить healthy-версию $CURRENT_SHA как last-good-version"
+                exit 1
+            fi
+        else
+            printf 'Предупреждение: текущий контейнер не является healthy.\n'
+            printf 'Версия %s не будет сохранена как last-good-version.\n' "$CURRENT_SHA"
+
+            log "WARNING" "Текущая версия $CURRENT_SHA не является healthy. Last-good-version не обновлён"
         fi
     else
         printf 'Предупреждение: current-version пуст.\n'
@@ -382,10 +393,21 @@ else
         CURRENT_SHA="${BASH_REMATCH[1]}"
 
         printf 'Текущая версия (из контейнера): %s\n' "$CURRENT_SHA"
+        printf 'Проверяем состояние текущего контейнера...\n'
 
-        if ! update_last_good "$CURRENT_SHA"; then
-            printf 'Ошибка: не удалось сохранить предыдущую рабочую версию.\n' >&2
-            exit 1
+        if wait_for_health "$CONTAINER_NAME" 10 "$INTERVAL"; then
+            printf 'Текущая версия %s подтверждена как healthy.\n' "$CURRENT_SHA"
+
+            if ! update_last_good "$CURRENT_SHA"; then
+                printf 'Ошибка: не удалось сохранить предыдущую рабочую версию.\n' >&2
+                log "ERROR" "Не удалось сохранить healthy-версию $CURRENT_SHA как last-good-version"
+                exit 1
+            fi
+        else
+            printf 'Предупреждение: текущий контейнер не является healthy.\n'
+            printf 'Версия %s не будет сохранена как last-good-version.\n' "$CURRENT_SHA"
+
+            log "WARNING" "Текущая версия $CURRENT_SHA не является healthy. Last-good-version не обновлён"
         fi
     else
         CURRENT_SHA="unknown"
@@ -395,7 +417,6 @@ else
         log "WARNING" "Не удалось определить текущую версию"
     fi
 fi
-
 
 # ------------------------------------------------------------
 # 2. Пытаемся задеплоить новую версию
