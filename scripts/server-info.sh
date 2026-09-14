@@ -1,87 +1,163 @@
 #!/bin/bash
 
-HOSTNAME=$(hostname)
-SSH_STATUS=$(systemctl is-active ssh)
-IP_ADDRESS=$(hostname -I | awk '{print $1}')
-CURRENT_DATE=$(date "+%Y-%m-%d %H:%M:%S")
-CURRENT_USER=$(whoami)
+set -euo pipefail
 
-/opt/spidersoft/scripts/log_message.sh INFO "server-info.sh executed by $CURRENT_USER"
+readonly CURRENT_VERSION_FILE="/opt/spidersoft/app/current-version"
+readonly LOG_SCRIPT="/opt/spidersoft/scripts/log_message.sh"
 
-echo "========================================="
-echo "SpiderSoft Server Information"
-echo "========================================="
-echo
+HOSTNAME="$(hostname)"
+CURRENT_DATE="$(date '+%Y-%m-%d %H:%M:%S')"
+CURRENT_USER="$(whoami)"
+KERNEL="$(uname -r)"
+UPTIME="$(uptime -p)"
 
-echo "Hostname:"
-echo "$HOSTNAME"
-echo
+# Get primary IP address
+IP_ADDRESS="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 
-echo "Current User:"
-echo "$CURRENT_USER"
-echo
-
-echo "Kernel:"
-uname -r
-echo
-
-echo "Current date:"
-echo "$CURRENT_DATE"
-echo
-
-echo "Uptime:"
-uptime -p
-echo
-
-echo "CPU:"
-lscpu | grep "Model name" | sed 's/Model name:[[:space:]]*//'
-echo
-
-echo "RAM:"
-free -h | awk '/Mem:/ {print $3 " / " $2}'
-echo
-
-echo "Disk Usage:"
-df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 " used)"}'
-echo
-
-echo "IP Address:"
-echo "$IP_ADDRESS"
-echo
-
-
-echo "SSH Status:"
-
-if [ "$SSH_STATUS" = "active" ]; then
-    echo -e "\e[32m$SSH_STATUS\e[0m"
-else
-    echo -e "\e[31m$SSH_STATUS\e[0m"
+if [[ -z "$IP_ADDRESS" ]]; then
+    IP_ADDRESS="Unknown"
 fi
 
-echo
+# Get SSH service status.
+# systemctl is-active returns non-zero when the service is not active,
+# but this is expected and should not terminate the script.
+if SSH_STATUS="$(systemctl is-active ssh 2>/dev/null)"; then
+    :
+else
+    SSH_STATUS="${SSH_STATUS:-unknown}"
+fi
 
-echo "Docker:"
+# Get CPU model
+CPU_MODEL="$(
+    LC_ALL=C lscpu 2>/dev/null |
+        awk -F: '/^Model name:/ {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+            print $2
+            exit
+        }' || true
+)"
+
+if [[ -z "$CPU_MODEL" ]]; then
+    CPU_MODEL="Unknown"
+fi
+
+# Get RAM usage
+RAM_USAGE="$(
+    free -h 2>/dev/null |
+        awk '/^Mem:/ {
+            print $3 " / " $2
+            exit
+        }' || true
+)"
+
+if [[ -z "$RAM_USAGE" ]]; then
+    RAM_USAGE="Unknown"
+fi
+
+# Get root filesystem usage
+DISK_USAGE="$(
+    df -hP / 2>/dev/null |
+        awk 'NR == 2 {
+            print $3 " / " $2 " (" $5 " used)"
+            exit
+        }' || true
+)"
+
+if [[ -z "$DISK_USAGE" ]]; then
+    DISK_USAGE="Unknown"
+fi
+
+# Write execution log.
+# Logging failure should not prevent server information from being displayed.
+if [[ -x "$LOG_SCRIPT" ]]; then
+    if ! "$LOG_SCRIPT" INFO "server-info.sh executed by $CURRENT_USER"; then
+        printf 'Warning: failed to write execution log\n' >&2
+    fi
+else
+    printf 'Warning: log script not found or not executable: %s\n' "$LOG_SCRIPT" >&2
+fi
+
+printf '%s\n' "========================================="
+printf '%s\n' "SpiderSoft Server Information"
+printf '%s\n' "========================================="
+printf '\n'
+
+printf '%s\n' "Hostname:"
+printf '%s\n' "$HOSTNAME"
+printf '\n'
+
+printf '%s\n' "Current User:"
+printf '%s\n' "$CURRENT_USER"
+printf '\n'
+
+printf '%s\n' "Kernel:"
+printf '%s\n' "$KERNEL"
+printf '\n'
+
+printf '%s\n' "Current date:"
+printf '%s\n' "$CURRENT_DATE"
+printf '\n'
+
+printf '%s\n' "Uptime:"
+printf '%s\n' "$UPTIME"
+printf '\n'
+
+printf '%s\n' "CPU:"
+printf '%s\n' "$CPU_MODEL"
+printf '\n'
+
+printf '%s\n' "RAM:"
+printf '%s\n' "$RAM_USAGE"
+printf '\n'
+
+printf '%s\n' "Disk Usage:"
+printf '%s\n' "$DISK_USAGE"
+printf '\n'
+
+printf '%s\n' "IP Address:"
+printf '%s\n' "$IP_ADDRESS"
+printf '\n'
+
+printf '%s\n' "SSH Status:"
+
+if [[ "$SSH_STATUS" == "active" ]]; then
+    printf '\033[32m%s\033[0m\n' "$SSH_STATUS"
+else
+    printf '\033[31m%s\033[0m\n' "$SSH_STATUS"
+fi
+
+printf '\n'
+
+printf '%s\n' "Docker:"
 if command -v docker >/dev/null 2>&1; then
-    echo -e "\e[32mInstalled\e[0m"
+    printf '\033[32m%s\033[0m\n' "Installed"
 else
-    echo -e "\e[31mNot Installed\e[0m"
+    printf '\033[31m%s\033[0m\n' "Not Installed"
 fi
-echo
 
-echo "Git:"
+printf '\n'
+
+printf '%s\n' "Git:"
 if command -v git >/dev/null 2>&1; then
-    echo -e "\e[32mInstalled\e[0m"
+    printf '\033[32m%s\033[0m\n' "Installed"
 else
-    echo -e "\e[31mNot Installed\e[0m"
-fi
-echo
-
-echo ""
-echo "=== Текущая версия API ==="
-if [ -f /opt/spidersoft/app/current-version ]; then
-    echo "  $(cat /opt/spidersoft/app/current-version)"
-else
-    echo "  ⚠️ Неизвестно (файл current-version не найден)"
+    printf '\033[31m%s\033[0m\n' "Not Installed"
 fi
 
-echo "========================================="
+printf '\n'
+
+printf '%s\n' "=== Текущая версия API ==="
+
+if [[ -f "$CURRENT_VERSION_FILE" && -r "$CURRENT_VERSION_FILE" ]]; then
+    API_VERSION="$(<"$CURRENT_VERSION_FILE")"
+
+    if [[ -n "$API_VERSION" ]]; then
+        printf '  %s\n' "$API_VERSION"
+    else
+        printf '  ⚠️ Неизвестно (файл current-version пуст)\n'
+    fi
+else
+    printf '  ⚠️ Неизвестно (файл current-version не найден или недоступен)\n'
+fi
+
+printf '%s\n' "========================================="

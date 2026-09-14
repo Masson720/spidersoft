@@ -1,13 +1,51 @@
 #!/bin/bash
 
-OUTPUT_FILE="/var/www/spidersoft/index.html"
+set -Eeuo pipefail
 
-HOSTNAME=$(hostname)
-KERNEL=$(uname -r)
-RAM=$(free -h | awk '/^Mem:/ {print $2}')
-IP_ADDRESS=$(hostname -I | awk '{print $1}')
+readonly OUTPUT_FILE="/var/www/spidersoft/index.html"
+readonly OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
+readonly TEMP_FILE="${OUTPUT_FILE}.tmp"
 
-cat > "$OUTPUT_FILE" << EOF
+HOSTNAME="$(hostname)"
+KERNEL="$(uname -r)"
+
+RAM="$(
+    free -h 2>/dev/null |
+        awk '/^Mem:/ {
+            print $2
+            exit
+        }' ||
+        true
+)"
+
+IP_ADDRESS="$(
+    hostname -I 2>/dev/null |
+        awk '{print $1}' ||
+        true
+)"
+
+if [[ -z "$RAM" ]]; then
+    RAM="Unknown"
+fi
+
+if [[ -z "$IP_ADDRESS" ]]; then
+    IP_ADDRESS="Unknown"
+fi
+
+if [[ ! -d "$OUTPUT_DIR" ]]; then
+    printf 'Error: output directory does not exist: %s\n' "$OUTPUT_DIR" >&2
+    exit 1
+fi
+
+cleanup() {
+    if [[ -f "$TEMP_FILE" ]]; then
+        rm -f "$TEMP_FILE"
+    fi
+}
+
+trap cleanup EXIT
+
+cat > "$TEMP_FILE" <<EOF
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,4 +65,10 @@ cat > "$OUTPUT_FILE" << EOF
 </html>
 EOF
 
-echo "Web page generated successfully."
+if ! mv "$TEMP_FILE" "$OUTPUT_FILE"; then
+    printf 'Error: failed to replace output file: %s\n' "$OUTPUT_FILE" >&2
+    exit 1
+fi
+
+printf 'Web page generated successfully.\n'
+printf 'Output: %s\n' "$OUTPUT_FILE"

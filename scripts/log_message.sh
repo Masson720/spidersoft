@@ -1,24 +1,43 @@
 #!/bin/bash
 
-LOG_FILE="/var/log/spidersoft/admin.log"
+set -Eeuo pipefail
+
+readonly LOG_FILE="/var/log/spidersoft/admin.log"
+
+if [[ $# -ne 2 ]]; then
+    printf 'Usage: %s LEVEL "MESSAGE"\n' "$0" >&2
+    printf 'Allowed levels: INFO WARNING ERROR DEBUG\n' >&2
+    exit 1
+fi
 
 LEVEL="$1"
 MESSAGE="$2"
-TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 
-case "$LEVEL" in 
-	INFO|WARNING|ERROR|DEBUG)
-	;;
-	*)
-	echo "invalid log level: $LEVEL"
-	echo "Allowed levels: INFO WARNING ERROR DEBUG"
-	exit 1
-	;;
+case "$LEVEL" in
+    INFO|WARNING|ERROR|DEBUG)
+        ;;
+    *)
+        printf 'Error: invalid log level: %s\n' "$LEVEL" >&2
+        printf 'Allowed levels: INFO WARNING ERROR DEBUG\n' >&2
+        exit 1
+        ;;
 esac
 
-if [ -n "$LEVEL" ] && [ -n "$MESSAGE" ]; then
-	echo "$TIMESTAMP [$LEVEL] $MESSAGE" >> "$LOG_FILE"
-else
-	printf "Usage: log_message.sh LEVEL \"MESSAGE\""
-	exit 1
+if [[ -z "$MESSAGE" ]]; then
+    printf 'Error: message cannot be empty.\n' >&2
+    exit 1
+fi
+
+TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
+
+# Keep each log entry on a single line.
+MESSAGE="${MESSAGE//$'\n'/ }"
+
+if ! printf '%s [%s] %s\n' \
+    "$TIMESTAMP" \
+    "$LEVEL" \
+    "$MESSAGE" >> "$LOG_FILE"; then
+
+    printf 'Error: failed to write to log file: %s\n' "$LOG_FILE" >&2
+    exit 1
 fi
