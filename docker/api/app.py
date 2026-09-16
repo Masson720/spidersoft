@@ -114,7 +114,8 @@ def track_and_log(f):
                     'method': method,
                     'endpoint': endpoint,
                     'status': status_code,
-                    'duration_ms': round(duration_ms, 3)
+                    'duration_ms': round(duration_ms, 3),
+                    'client_ip': client_ip
                 }
             )
 
