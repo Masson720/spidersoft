@@ -2,7 +2,7 @@
 
 # Скрипт деплоя API с автоматическим откатом
 
-set -Eeuo pipefail
+set -euo pipefail
 
 # --- Параметры ---
 
