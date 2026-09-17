@@ -97,7 +97,10 @@ def track_and_log(f):
         endpoint = request.path
         start_time = time.time()
         status_code = 200  # по умолчанию
-
+        client_ip = request.headers.get(
+            "X-Real-IP",
+            request.remote_addr or "unknown"
+        )
         try:
             response = f(*args, **kwargs)
             if isinstance(response, tuple):
