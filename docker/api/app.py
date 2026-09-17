@@ -47,7 +47,21 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 # Добавляем статическое поле "service" во все записи
-logger = logging.LoggerAdapter(logger, {'service': 'SpiderSoft API'})
+class SpiderSoftLoggerAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        call_extra = kwargs.get("extra") or {}
+
+        kwargs["extra"] = {
+            **self.extra,
+            **call_extra
+        }
+
+        return msg, kwargs
+
+logger = SpiderSoftLoggerAdapter(
+    logger,
+    {'service': 'SpiderSoft API'}
+)
 
 # ============================================
 # FLASK ПРИЛОЖЕНИЕ
