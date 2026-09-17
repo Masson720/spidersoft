@@ -22,12 +22,25 @@ handler.setLevel(logging.DEBUG)
 
 # Форматировщик JSON
 formatter = jsonlogger.JsonFormatter(
-    fmt='%(asctime)s %(levelname)s %(message)s %(module)s %(funcName)s',
+    fmt=(
+        '%(asctime)s %(levelname)s %(message)s '
+        '%(module)s %(funcName)s '
+        '%(method)s %(endpoint)s %(status)s '
+        '%(duration_ms)s %(client_ip)s %(error)s'
+    ),
     datefmt='%Y-%m-%dT%H:%M:%S',
     rename_fields={
         'asctime': 'timestamp',
         'levelname': 'level',
         'message': 'message'
+    },
+    defaults={
+        'method': None,
+        'endpoint': None,
+        'status': None,
+        'duration_ms': None,
+        'client_ip': None,
+        'error': None
     }
 )
 handler.setFormatter(formatter)
